@@ -5,6 +5,7 @@ Created on Fri May 04 10:26:49 2018
 @author: Mostafa Meliani <melimostafa@gmail.com>
 Multi-Fidelity co-Kriging: recursive formulation with autoregressive model of 
 order 1 (AR1)
+Partial Least Square decomposition added on lowest fidelity level
 """
 
 from __future__ import division
@@ -13,6 +14,9 @@ from smt.surrogate_models.krg_based import KrgBased
 from types import FunctionType
 from smt.utils.kriging_utils import l1_cross_distances, componentwise_distance,\
     standardization
+    
+from smt.utils.kriging_utils import componentwise_distance_PLS
+from sklearn.cross_decomposition.pls_ import PLSRegression as pls
 from scipy.linalg import solve_triangular
 from scipy import linalg
 from sklearn.metrics.pairwise import manhattan_distances
@@ -21,19 +25,19 @@ from copy import deepcopy
 from sys import exit
 
 """
-The MFK class.
+The MFKPLS class.
 """
 
 
-class MFK(KrgBased):
+class MFKPLS(KrgBased):
 
     """
-    - MFK
+    - MFKPLS
     """
     def _initialize(self):
-        super(MFK, self)._initialize()
+        super(MFKPLS, self)._initialize()
         declare = self.options.declare
-        
+        declare('n_comp', 1, types=int, desc='Number of principal components')
         declare('rho_regr', 'constant',types=FunctionType,\
                 values=('constant', 'linear', 'quadratic'), desc='regr. term')
         declare('theta0', None, types=(list, np.ndarray), \
@@ -41,13 +45,18 @@ class MFK(KrgBased):
         declare('optim_var', False, types = bool, \
                 values = (True, False), \
                 desc ='Turning this option to True, forces variance to zero at HF samples ')
-        declare('eval_noise', False, types = bool, \
-                values = (True, False), desc ='noise evaluation flag')
-        declare('noise0', 1e-6, types = float, \
-                desc ='Initial noise hyperparameter')
-        self.name = 'MFK'
+        self.name = 'MFKPLS'
     
+    def _componentwise_distance(self,dx,opt=0):
+        d = componentwise_distance_PLS(dx,self.options['corr'].__name__,
+                                       self.options['n_comp'],self.coeff_pls)
+        return d
+    
+    def _compute_pls(self,X,y):
+        _pls = pls(self.options['n_comp'])
+        self.coeff_pls = _pls.fit(X.copy(),y.copy()).x_rotations_
 
+        return X,y
    
 
     def _check_list_structure(self, X, y):
@@ -105,6 +114,10 @@ class MFK(KrgBased):
         xt =[]
         yt = []
         i=0
+        _pls = pls(self.options['n_comp'])
+        self.m_pls = _pls.fit(self.training_points[None][0][0].copy(), self.training_points[None][0][1].copy())
+        self.coeff_pls = self.m_pls.x_rotations_     
+        
         while(self.training_points.get(i, None) is not None):
             xt.append(self.training_points[i][0][0])
             yt.append(self.training_points[i][0][1])
@@ -120,9 +133,10 @@ class MFK(KrgBased):
         
         _, _, self.X_mean, self.y_mean, self.X_std, \
             self.y_std = standardization(np.concatenate(xt,axis=0), np.concatenate(yt,axis=0))
-        
+         
 #         self.X_mean, self.y_mean, self.X_std, \
 #             self.y_std = 0.,0.,1.,1.
+            
         nlevel = self.nlvl
         n_samples = self.nt_all
 
@@ -194,10 +208,7 @@ class MFK(KrgBased):
             self.options['eval_noise'] = False
             self._new_train()
             
-    def _componentwise_distance(self,dx,opt=0):
-        d = componentwise_distance(dx,self.options['corr'].__name__,
-                                   self.nx)
-        return d
+    
     
     def _predict_intermediate_values(self, X, lvl, descale = True):
         """
@@ -454,7 +465,7 @@ class MFK(KrgBased):
 
         df_dx = np.dot(df, beta)
         d_dx=x[:,kx].reshape((n_eval,1))-self.X_norma_all[0][:,kx].reshape((1,self.nt_all[0]))
-        theta = self.optimal_theta[0]
+        theta = np.sum(self.optimal_theta[0] * self.coeff_pls**2,axis=1)
 
         dy_dx[:,0] = np.ravel((df_dx-2*theta[kx]*np.dot(d_dx*r_,gamma)))
 
@@ -477,7 +488,7 @@ class MFK(KrgBased):
             
             df_dx = np.dot(df.T, beta)
             d_dx=x[:,kx].reshape((n_eval,1))-self.X_norma_all[i][:,kx].reshape((1,self.nt_all[i]))
-            theta = self.optimal_theta[i]
+            theta = np.sum(self.optimal_theta[i] * self.coeff_pls**2,axis=1)
             # scaled predictor
             dy_dx[:,i] = np.ravel(df_dx-2*theta[kx]*np.dot(d_dx*r_,gamma))
        

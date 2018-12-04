@@ -143,7 +143,6 @@ class Test(SMTestCase):
         np.random.seed(0)
         xt = sampling(self.nt)
         yt = prob(xt)
-        print(prob(xt,kx=0).shape)
         for i in range(self.ndim):
             yt = np.concatenate((yt,prob(xt,kx=i)),axis=1)
         
@@ -211,7 +210,7 @@ class Test(SMTestCase):
     
     def test_exp_MFK(self):
         self.run_MF_test()
-        
+
     # --------------------------------------------------------------------
     # Function: tanh
 
@@ -290,7 +289,7 @@ class Test(SMTestCase):
     
     def test_cos_MFK(self):
         self.run_MF_test()
-    
+
 
 if __name__ == '__main__':
     print_output = True
